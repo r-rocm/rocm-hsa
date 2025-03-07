@@ -1,0 +1,35 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+ROCM_VERSION=6.2.4
+ROCM_PATH=/opt/rocm-${ROCM_VERSION}
+ROCM_BIN_PATH=${ROCM_PATH}/bin
+MAKEOPTS := "-j$(shell nproc)"
+
+SRC_DIR := $(shell pwd)/src
+BUILD_PATH := ${SRC_DIR}/rocm-build
+DEB_INST_DIR :=  $(shell pwd)/debian/rocm-hsa
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	cmake -S ${SRC_DIR} -B ${BUILD_PATH} \
+		-DCMAKE_INSTALL_PREFIX=${ROCM_PATH} \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_C_COMPILER=${ROCM_BIN_PATH}/clang \
+		-DCMAKE_CXX_COMPILER=${ROCM_BIN_PATH}/clang++ \
+		-DBUILD_SHARED_LIBS=ON \
+		-DENABLE_LDCONFIG=OFF \
+		-DADDRESS_SANITIZER=ON \
+		-DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}:${ROCM_PATH}"
+
+override_dh_auto_build:
+	cmake --build $(BUILD_PATH) -- ${MAKEOPTS}
+
+override_dh_auto_install:
+	DESTDIR=$(DEB_INST_DIR)/ cmake --build $(BUILD_PATH) -- ${MAKEOPTS} install
+
+override_dh_install:
+	echo "dh_install skipped"
