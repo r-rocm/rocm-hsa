@@ -1,0 +1,24 @@
+From: Sakura286 <sakura286@outlook.com>
+Date: Wed, 12 Mar 2025 15:07:07 +0800
+Subject: riscv64-unsupport-pause
+
+---
+ src/core/util/locks.h | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/src/core/util/locks.h b/src/core/util/locks.h
+index 6c0de49..3c09531 100644
+--- a/src/core/util/locks.h
++++ b/src/core/util/locks.h
+@@ -72,7 +72,11 @@ class HybridMutex {
+     while (!lock_.compare_exchange_strong(old, 1)) {
+       cnt--;
+       if (cnt > maxSpinIterPause) {
++#if defined(__riscv)
++        asm volatile ("nop");;
++#else
+         _mm_pause();
++#endif
+       } else if (cnt-- > maxSpinIterYield) {
+         os::YieldThread();
+       } else {
