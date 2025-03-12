@@ -10,6 +10,7 @@ Build-Depends:
  rocm-thunk,
  rocprofiler-register-rocm,
  libdrm-dev,
+ libnuma-dev,
 Standards-Version: 4.7.0
 Homepage: https://github.com/ROCm/ROCR-Runtime
 Vcs-Browser: https://github.com/r-rocm/rocm-hsa
