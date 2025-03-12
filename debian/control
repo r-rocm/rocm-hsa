@@ -7,6 +7,7 @@ Build-Depends:
  debhelper-compat (= 13),
  cmake,
  rocm-device-libs,
+ rocm-env,
  rocm-thunk,
  rocprofiler-register-rocm,
  libdrm-dev,
