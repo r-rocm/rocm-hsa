@@ -2,7 +2,7 @@
 
 export DH_VERBOSE = 1
 
-ROCM_VERSION=${REVYOS_ROCM_VERSION}
+ROCM_VERSION=$(shell cat /opt/REVYOS_ROCM_VERSION)
 ROCM_PATH=/opt/rocm-${ROCM_VERSION}
 ROCM_BIN_PATH=${ROCM_PATH}/bin
 MAKEOPTS := "-j$(shell nproc)"
