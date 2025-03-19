@@ -1,3 +1,9 @@
+rocm-hsa (6.2.4-2) unstable; urgency=medium
+
+  * Add depends.
+
+ -- CHEN Xuan <chenxuan@iscas.ac.cn>  Thu, 20 Mar 2025 07:47:29 +0800
+
 rocm-hsa (6.2.4-1revyos1) UNRELEASED; urgency=medium
 
   * Initial release.
