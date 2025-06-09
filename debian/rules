@@ -2,34 +2,39 @@
 
 export DH_VERBOSE = 1
 
-ROCM_VERSION=$(shell cat /opt/REVYOS_ROCM_VERSION)
-ROCM_PATH=/opt/rocm-${ROCM_VERSION}
-ROCM_BIN_PATH=${ROCM_PATH}/bin
-MAKEOPTS := "-j$(shell nproc)"
+PKG_NAME=rocm-hsa
 
-SRC_DIR := $(shell pwd)/src
-BUILD_PATH := ${SRC_DIR}/rocm-build
-DEB_INST_DIR :=  $(shell pwd)/debian/rocm-hsa
+ROCM_VERSION=$(shell cat /opt/REVYOS_ROCM_VERSION)
+ROCM_PATH=/opt/rocm-$(ROCM_VERSION)
+
+MAKEOPTS="-j$$(($$(nproc) / 2))"
+
+TOP_DIR := $(shell pwd)
+SRC_PATH := $(TOP_DIR)/src
+BUILD_PATH := $(TOP_DIR)/build-rocm
+DEB_INST_DIR := $(TOP_DIR)/debian/$(PKG_NAME)
+
+REVYOS_ROCM_CMAKE_PARAMS := -S $(SRC_PATH) -B $(BUILD_PATH)
+REVYOS_ROCM_CMAKE_PARAMS += -DCMAKE_INSTALL_PREFIX=$(ROCM_PATH)
+REVYOS_ROCM_CMAKE_PARAMS += -DCMAKE_C_COMPILER=$(ROCM_PATH)/bin/clang
+REVYOS_ROCM_CMAKE_PARAMS += -DCMAKE_CXX_COMPILER=$(ROCM_PATH)/bin/clang++
+REVYOS_ROCM_CMAKE_PARAMS += -DCMAKE_BUILD_TYPE=Release
+REVYOS_ROCM_CMAKE_PARAMS += -DCMAKE_VERBOSE_MAKEFILE=TRUE
+REVYOS_ROCM_CMAKE_PARAMS += -DCMAKE_PREFIX_PATH="$(ROCM_PATH);$(ROCM_PATH)/share/rocm/cmake/;$(ROCM_PATH)/share/rocmcmakebuildtools/cmake"
 
 %:
 	dh $@
 
 override_dh_auto_configure:
-	cmake -S ${SRC_DIR} -B ${BUILD_PATH} \
-		-DCMAKE_INSTALL_PREFIX=${ROCM_PATH} \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_C_COMPILER=${ROCM_BIN_PATH}/clang \
-		-DCMAKE_CXX_COMPILER=${ROCM_BIN_PATH}/clang++ \
+	cmake $(REVYOS_ROCM_CMAKE_PARAMS) \
 		-DBUILD_SHARED_LIBS=ON \
-		-DENABLE_LDCONFIG=OFF \
-		-DADDRESS_SANITIZER=ON \
-		-DCMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}:${ROCM_PATH}"
+		-DENABLE_LDCONFIG=OFF
 
 override_dh_auto_build:
-	cmake --build $(BUILD_PATH) -- ${MAKEOPTS}
+	cmake --build $(BUILD_PATH) -- $(MAKEOPTS)
 
 override_dh_auto_install:
-	DESTDIR=$(DEB_INST_DIR)/ cmake --build $(BUILD_PATH) -- ${MAKEOPTS} install
+	DESTDIR=$(DEB_INST_DIR)/ cmake --build $(BUILD_PATH) -- $(MAKEOPTS) install
 
 override_dh_install:
 	echo "dh_install skipped"

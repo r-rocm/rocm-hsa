@@ -1,3 +1,9 @@
+rocm-hsa (6.2.4-3) unstable; urgency=medium
+
+  * Rebuild for toolchain fix.
+
+ --  <chenxuan@iscas.ac.cn>  Tue, 15 Apr 2025 01:16:51 +0800
+
 rocm-hsa (6.2.4-2) unstable; urgency=medium
 
   * Add depends.

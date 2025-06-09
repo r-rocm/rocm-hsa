@@ -7,11 +7,12 @@ Build-Depends:
  debhelper-compat (= 13),
  cmake,
  pkg-config,
+ rocm-core,
  rocm-devicelibs,
  rocm-env,
  rocm-llvm,
  rocm-thunk,
- rocprofiler-register-rocm,
+ rocm-rocprofiler-register-dev,
  libdrm-dev,
  libelf-dev,
  libnuma-dev,
@@ -26,7 +27,12 @@ Architecture: any
 Depends:
  ${shlibs:Depends},
  ${misc:Depends},
- rocm-thunk,
+ rocm-core,
  rocm-devicelibs,
- rocprofiler-register-rocm,
-Description: rocm-hsa
+ rocm-env,
+ rocm-thunk,
+ rocm-rocprofiler-register,
+Description: HSA Runtime API and runtime for ROCm
+ This repository includes the user-mode API interfaces and libraries necessary
+ for host applications to launch compute kernels to available HSA ROCm kernel
+ agents. Reference source code for the core runtime is also available.
