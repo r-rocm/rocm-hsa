@@ -32,7 +32,18 @@ Depends:
  rocm-env,
  rocm-thunk,
  rocm-rocprofiler-register,
-Description: HSA Runtime API and runtime for ROCm
+Description: HSA Runtime API and runtime for ROCm. Binary package.
+ This repository includes the user-mode API interfaces and libraries necessary
+ for host applications to launch compute kernels to available HSA ROCm kernel
+ agents. Reference source code for the core runtime is also available.
+
+Package: rocm-hsa-dev
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ rocm-hsa
+Description: HSA Runtime API and runtime for ROCm. Development package.
  This repository includes the user-mode API interfaces and libraries necessary
  for host applications to launch compute kernels to available HSA ROCm kernel
  agents. Reference source code for the core runtime is also available.
