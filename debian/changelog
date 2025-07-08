@@ -1,3 +1,9 @@
+rocm-hsa (6.2.4-8) unstable; urgency=medium
+
+  * Shit, I forgot kill dh_strip
+
+ --  <chenxuan@iscas.ac.cn>  Tue, 08 Jul 2025 17:04:50 +0800
+
 rocm-hsa (6.2.4-7) unstable; urgency=medium
 
   * Rebuild for thunk rebuild.
