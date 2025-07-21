@@ -2,7 +2,7 @@
 
 export DH_VERBOSE = 1
 
-PKG_NAME=rocm-hsa
+PKG_NAME=rocm-rocr
 
 ROCM_VERSION=$(shell cat /opt/REVYOS_ROCM_VERSION)
 ROCM_PATH=/opt/rocm-$(ROCM_VERSION)
