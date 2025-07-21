@@ -11,8 +11,8 @@ Build-Depends:
  rocm-devicelibs,
  rocm-env,
  rocm-llvm,
- rocm-thunk,
  rocm-rocprofiler-register-dev,
+ rocm-smi-lib-dev,
  libdrm-dev,
  libelf-dev,
  libnuma-dev,
@@ -45,6 +45,7 @@ Depends:
  rocm-env,
  rocm-thunk,
  rocm-rocprofiler-register,
+ rocm-smi-lib-dev,
 Description: HSA Runtime API and runtime for ROCm. Binary package.
  This repository includes the user-mode API interfaces and libraries necessary
  for host applications to launch compute kernels to available HSA ROCm kernel
@@ -56,6 +57,7 @@ Depends:
  ${shlibs:Depends},
  ${misc:Depends},
  rocm-rocr,
+ rocm-smi-lib,
 Description: HSA Runtime API and runtime for ROCm. Development package.
  This repository includes the user-mode API interfaces and libraries necessary
  for host applications to launch compute kernels to available HSA ROCm kernel
