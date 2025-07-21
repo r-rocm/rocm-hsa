@@ -1,0 +1,43 @@
+From: Sakura286 <sakura286@outlook.com>
+Date: Mon, 21 Jul 2025 16:58:37 +0800
+Subject: Add riscv64 support
+
+---
+ runtime/hsa-runtime/core/util/lnx/os_linux.cpp | 6 +++++-
+ runtime/hsa-runtime/core/util/locks.h          | 4 ++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/runtime/hsa-runtime/core/util/lnx/os_linux.cpp b/runtime/hsa-runtime/core/util/lnx/os_linux.cpp
+index 4d62979..f05e4eb 100644
+--- a/runtime/hsa-runtime/core/util/lnx/os_linux.cpp
++++ b/runtime/hsa-runtime/core/util/lnx/os_linux.cpp
+@@ -66,8 +66,12 @@
+ #endif
+ 
+ #ifdef __GLIBC__
+-#define ABS_ADDR(base, ptr) (ptr)
++#if (defined(__riscv) && __riscv_xlen == 64)
++#define ABS_ADDR(base, ptr) ((base) + (ptr))
+ #else
++#define ABS_ADDR(base, ptr) (ptr)
++#endif
++#else // Not __GLIBC__
+ #define ABS_ADDR(base, ptr) ((base) + (ptr))
+ #endif
+ 
+diff --git a/runtime/hsa-runtime/core/util/locks.h b/runtime/hsa-runtime/core/util/locks.h
+index 6c0de49..3c09531 100644
+--- a/runtime/hsa-runtime/core/util/locks.h
++++ b/runtime/hsa-runtime/core/util/locks.h
+@@ -72,7 +72,11 @@ class HybridMutex {
+     while (!lock_.compare_exchange_strong(old, 1)) {
+       cnt--;
+       if (cnt > maxSpinIterPause) {
++#if defined(__riscv)
++        asm volatile ("nop");;
++#else
+         _mm_pause();
++#endif
+       } else if (cnt-- > maxSpinIterYield) {
+         os::YieldThread();
+       } else {
