@@ -1,3 +1,5 @@
 opt/rocm-@ROCM_VERSION@/include
 opt/rocm-@ROCM_VERSION@/lib/cmake
+opt/rocm-@ROCM_VERSION@/lib/lib*.a
+opt/rocm-@ROCM_VERSION@/lib/pkgconfig
 opt/rocm-@ROCM_VERSION@/share
