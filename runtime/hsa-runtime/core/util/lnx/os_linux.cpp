@@ -66,8 +66,12 @@
 #endif
 
 #ifdef __GLIBC__
-#define ABS_ADDR(base, ptr) (ptr)
+#if (defined(__riscv) && __riscv_xlen == 64)
+#define ABS_ADDR(base, ptr) ((base) + (ptr))
 #else
+#define ABS_ADDR(base, ptr) (ptr)
+#endif
+#else // Not __GLIBC__
 #define ABS_ADDR(base, ptr) ((base) + (ptr))
 #endif
 
