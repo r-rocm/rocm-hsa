@@ -258,7 +258,11 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       ring[barrier & mask].barrier_and.completion_signal = Signal::Convert(async_doorbell_);
       if (Runtime::runtime_singleton_->flag().dev_mem_queue() && !needsPcieOrdering()) {
         // Ensure the packet body is written as header may get reordered when writing over PCIE
+#if !defined(__riscv)
         _mm_sfence();
+#else
+        asm volatile("fence w,w" ::: "memory");
+#endif
       }
       atomic::Store(&ring[barrier & mask].barrier_and.header, kBarrierHeader,
                     std::memory_order_release);
@@ -305,7 +309,11 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       if (write_index != 0) {
         if (Runtime::runtime_singleton_->flag().dev_mem_queue() && !needsPcieOrdering()) {
           // Ensure the packet body is written as header may get reordered when writing over PCIE
+#if !defined(__riscv)
           _mm_sfence();
+#else
+          asm volatile("fence w,w" ::: "memory");
+#endif
         }
         atomic::Store(&ring[write & mask].packet.header, packets[first_written_packet_index].packet.header,
                       std::memory_order_release);
@@ -374,7 +382,11 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     handler.first(&ring[i & mask], 1, i, handler.second, PacketWriter);
     if (Runtime::runtime_singleton_->flag().dev_mem_queue() && !needsPcieOrdering()) {
       // Ensure the packet body is written as header may get reordered when writing over PCIE
+#if !defined(__riscv)
       _mm_sfence();
+#else
+      asm volatile("fence w,w" ::: "memory");
+#endif
     }
     // Invalidate consumed packet.
     atomic::Store(&ring[i & mask].packet.header, kInvalidHeader, std::memory_order_release);

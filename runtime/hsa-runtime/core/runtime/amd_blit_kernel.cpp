@@ -1274,7 +1274,11 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   std::atomic_thread_fence(std::memory_order_release);
   if (core::Runtime::runtime_singleton_->flag().dev_mem_queue() && !queue_->needsPcieOrdering()) {
     // Ensure the packet body is written as header may get reordered when writing over PCIE
+#if !defined(__riscv)
     _mm_sfence();
+#else
+    asm volatile("fence w,w" ::: "memory");
+#endif
   }
   queue_buffer[index & queue_bitmask_].header = kDispatchPacketHeader;
 

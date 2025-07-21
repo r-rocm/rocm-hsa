@@ -366,7 +366,11 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
   do {
+#if !defined(__riscv)
     _mm_clflush((const void*)cur);
+#else
+    asm volatile("nop");
+#endif
     cur += cacheline_size;
   } while (cur <= (const char*)lastline);
 }
