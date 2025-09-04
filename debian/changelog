@@ -1,3 +1,9 @@
+rocm-rocr (6.4.3-1) trixie; urgency=medium
+
+  * Release 6.4.3-1
+
+ -- CHEN Xuan <chenxuan@iscas.ac.cn>  Thu, 04 Sep 2025 10:46:36 +0800
+
 rocm-rocr (6.4.2-1) trixie; urgency=medium
 
   * Release 6.4.2-1
