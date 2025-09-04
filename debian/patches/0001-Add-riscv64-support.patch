@@ -26,7 +26,7 @@ index 4d62979..f05e4eb 100644
  #endif
  
 diff --git a/runtime/hsa-runtime/core/util/locks.h b/runtime/hsa-runtime/core/util/locks.h
-index 6c0de49..3c09531 100644
+index 6c0de49..8797528 100644
 --- a/runtime/hsa-runtime/core/util/locks.h
 +++ b/runtime/hsa-runtime/core/util/locks.h
 @@ -72,7 +72,11 @@ class HybridMutex {
@@ -34,7 +34,7 @@ index 6c0de49..3c09531 100644
        cnt--;
        if (cnt > maxSpinIterPause) {
 +#if defined(__riscv)
-+        asm volatile ("nop");;
++        asm volatile(".insn 0x0100000f" ::: "memory");
 +#else
          _mm_pause();
 +#endif

@@ -105,7 +105,7 @@ index a86dabb..6ff6fae 100644
      // Invalidate consumed packet.
      atomic::Store(&ring[i & mask].packet.header, kInvalidHeader, std::memory_order_release);
 diff --git a/runtime/hsa-runtime/core/util/utils.h b/runtime/hsa-runtime/core/util/utils.h
-index 66c2028..5affd1f 100644
+index 66c2028..2669b8d 100644
 --- a/runtime/hsa-runtime/core/util/utils.h
 +++ b/runtime/hsa-runtime/core/util/utils.h
 @@ -366,7 +366,11 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
@@ -115,7 +115,7 @@ index 66c2028..5affd1f 100644
 +#if !defined(__riscv)
      _mm_clflush((const void*)cur);
 +#else
-+    asm volatile("nop");
++    asm volatile(".insn 0x0100000f" ::: "memory");
 +#endif
      cur += cacheline_size;
    } while (cur <= (const char*)lastline);
