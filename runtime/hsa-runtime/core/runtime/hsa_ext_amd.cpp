@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -296,7 +296,8 @@ hsa_status_t hsa_amd_memory_async_copy(void* dst, hsa_agent_t dst_agent_handle, 
 hsa_status_t hsa_amd_memory_async_copy_on_engine(void* dst, hsa_agent_t dst_agent_handle,
                                        const void* src, hsa_agent_t src_agent_handle, size_t size,
                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
-                                       hsa_signal_t completion_signal, hsa_amd_sdma_engine_id_t engine_id,
+                                       hsa_signal_t completion_signal,
+                                       hsa_amd_sdma_engine_id_t engine_id,
                                        bool force_copy_on_sdma) {
   TRY;
   IS_BAD_PTR(dst);
@@ -337,7 +338,8 @@ hsa_status_t hsa_amd_memory_async_copy_on_engine(void* dst, hsa_agent_t dst_agen
   CATCH;
 }
 
-hsa_status_t hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent_handle, hsa_agent_t src_agent_handle,
+hsa_status_t hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent_handle,
+                                               hsa_agent_t src_agent_handle,
                                                uint32_t *engine_ids_mask) {
   core::Agent* dst_agent = core::Agent::Convert(dst_agent_handle);
   IS_VALID(dst_agent);
@@ -345,7 +347,21 @@ hsa_status_t hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent_handle, hsa
   core::Agent* src_agent = core::Agent::Convert(src_agent_handle);
   IS_VALID(src_agent);
 
-  return core::Runtime::runtime_singleton_->CopyMemoryStatus(dst_agent, src_agent, engine_ids_mask);
+  return core::Runtime::runtime_singleton_->CopyMemoryStatus(dst_agent, src_agent,
+                                                             engine_ids_mask);
+}
+
+hsa_status_t hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent_handle,
+                                                      hsa_agent_t src_agent_handle,
+                                                      uint32_t* recommended_ids_mask) {
+  core::Agent* dst_agent = core::Agent::Convert(dst_agent_handle);
+  IS_VALID(dst_agent);
+
+  core::Agent* src_agent = core::Agent::Convert(src_agent_handle);
+  IS_VALID(src_agent);
+
+  return core::Runtime::runtime_singleton_->GetPreferredEngine(dst_agent, src_agent,
+                                                               recommended_ids_mask);
 }
 
 hsa_status_t hsa_amd_memory_async_copy_rect(
@@ -577,23 +593,42 @@ uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signal
                                  hsa_signal_value_t* satisfying_values) {
   TRY;
   if (!core::Runtime::runtime_singleton_->IsOpen()) {
-    assert(false && "hsa_amd_signal_wait_all called while not initialized.");
-    return 0;
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_NOT_INITIALIZED, "hsa_amd_signal_wait_all called while not initialized");
   }
-  // Do not check for signal invalidation. Invalidation may occur during async
-  // signal handler loop and is not an error.
-  for (int i = 0; i < signal_count; ++i)
-    assert(hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid() &&
-           "Invalid signal.");
 
-  std::vector<hsa_signal_value_t> satisfying_values_vec;
-  satisfying_values_vec.resize(signal_count);
+  // Treat NULL and invalid signals as already satisfied their condition and skip them
+  std::vector<hsa_signal_t> valid_signals;
+  std::vector<uint32_t> valid_signal_ids;
+  for (uint32_t i = 0; i < signal_count; i++){
+    if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
+      valid_signals.emplace_back(hsa_signals[i]);
+      valid_signal_ids.emplace_back(i);
+    }
+  }
+
+  // Return if there's no valid signal to wait on
+  if (valid_signals.empty()){
+    if (satisfying_values) {
+      // Set 0 as satisfying value for NULL and invalid signals
+      std::fill(satisfying_values, satisfying_values + signal_count, 0);
+    }
+    return uint32_t(0);
+  }
+
+  uint32_t valid_signal_count = valid_signals.size();
+
+  std::vector<hsa_signal_value_t> satisfying_values_vec(valid_signal_count);
   uint32_t first_satysifying_signal_idx =
-      core::Signal::WaitMultiple(signal_count, hsa_signals, conds, values, timeout_hint, wait_hint,
+      core::Signal::WaitMultiple(valid_signal_count, valid_signals.data(), conds, values, timeout_hint, wait_hint,
                                  satisfying_values_vec, true);
 
   if (satisfying_values) {
-    std::copy(satisfying_values_vec.begin(), satisfying_values_vec.end(), satisfying_values);
+    // Set 0 as satisfying value for NULL and invalid signals
+    std::vector<hsa_signal_value_t> satisfying_values_vec_result(signal_count, 0);
+    for (uint32_t i = 0; i < valid_signal_count; i++){
+      satisfying_values_vec_result[valid_signal_ids[i]] = satisfying_values_vec[i];
+    }
+    std::copy(satisfying_values_vec_result.begin(), satisfying_values_vec_result.end(), satisfying_values);
   }
 
   return first_satysifying_signal_idx;
@@ -606,19 +641,32 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
                                  hsa_signal_value_t* satisfying_value) {
   TRY;
   if (!core::Runtime::runtime_singleton_->IsOpen()) {
-    assert(false && "hsa_amd_signal_wait_any called while not initialized.");
-    return uint32_t(0);
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_NOT_INITIALIZED, "hsa_amd_signal_wait_any called while not initialized");
   }
-  // Do not check for signal invalidation.  Invalidation may occur during async
-  // signal handler loop and is not an error.
-  for (uint i = 0; i < signal_count; i++)
-    assert(hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid() &&
-           "Invalid signal.");
+
+  // Ignore NULL and invalid signals
+  std::vector<hsa_signal_t> valid_signals;
+  std::vector<uint32_t> valid_signal_ids;
+  for (uint32_t i = 0; i < signal_count; i++){
+    if (hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid()){
+      valid_signals.emplace_back(hsa_signals[i]);
+      valid_signal_ids.emplace_back(i);
+    }
+  }
+
+  // Return if there's no valid signal to wait on
+  // satisfying_value is ignored
+  if (valid_signals.empty()){
+    return std::numeric_limits<uint32_t>::max();
+  }
 
   std::vector<hsa_signal_value_t> satisfying_value_vec(1);
   uint32_t satisfying_signal_idx =
-      core::Signal::WaitMultiple(signal_count, hsa_signals, conds, values, timeout_hint, wait_hint,
+      core::Signal::WaitMultiple(valid_signals.size(), valid_signals.data(), conds, values, timeout_hint, wait_hint,
                                  satisfying_value_vec, false);
+
+  //  Map back the index
+  satisfying_signal_idx = valid_signal_ids[satisfying_signal_idx];
 
   if (satisfying_value) *satisfying_value = satisfying_value_vec.at(0);
 
@@ -834,7 +882,8 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
     alloc_flag |= core::MemoryRegion::AllocateExecutable;
 
 #ifdef SANITIZER_AMDGPU
-  alloc_flag |= core::MemoryRegion::AllocateAsan;
+  if (mem_region->owner()->device_type() == core::Agent::kAmdGpuDevice)
+    alloc_flag |= core::MemoryRegion::AllocateAsan;
 #endif
 
   return core::Runtime::runtime_singleton_->AllocateMemory(mem_region, size, alloc_flag, ptr);
@@ -1218,11 +1267,11 @@ hsa_status_t hsa_amd_spm_acquire(hsa_agent_t preferred_agent) {
   TRY;
   IS_OPEN();
   const core::Agent* agent = core::Agent::Convert(preferred_agent);
+  // Currently, the SPM API is only supported for GPU agents.
   if (agent == NULL || !agent->IsValid() || agent->device_type() != core::Agent::kAmdGpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  if (hsaKmtSPMAcquire(agent->node_id()) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-  return HSA_STATUS_SUCCESS;
+  return agent->driver().SPMAcquire(agent->node_id());
 
   CATCH;
 }
@@ -1232,12 +1281,11 @@ hsa_status_t hsa_amd_spm_release(hsa_agent_t preferred_agent) {
   IS_OPEN();
 
   const core::Agent* agent = core::Agent::Convert(preferred_agent);
+  // Currently, the SPM API is only supported for GPU agents.
   if (agent == NULL || !agent->IsValid() || agent->device_type() != core::Agent::kAmdGpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  if (hsaKmtSPMRelease(agent->node_id()) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-
-  return HSA_STATUS_SUCCESS;
+  return agent->driver().SPMRelease(agent->node_id());
 
   CATCH;
 }
@@ -1249,26 +1297,38 @@ hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t siz
   IS_OPEN();
 
   const core::Agent* agent = core::Agent::Convert(preferred_agent);
+  // Currently, the SPM API is only supported for GPU agents.
   if (agent == NULL || !agent->IsValid() || agent->device_type() != core::Agent::kAmdGpuDevice)
     return HSA_STATUS_ERROR_INVALID_AGENT;
 
-  if (hsaKmtSPMSetDestBuffer(agent->node_id(), size_in_bytes, timeout, size_copied, dest,
-                             is_data_loss) != HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR;
-
-  return HSA_STATUS_SUCCESS;
+  return agent->driver().SPMSetDestBuffer(agent->node_id(), size_in_bytes, timeout, size_copied,
+                                          dest, is_data_loss);
   CATCH;
 }
 
 hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
-                                            uint64_t* offset) {
+  uint64_t* offset) {
+TRY;
+IS_OPEN();
+IS_BAD_PTR(ptr);
+IS_BAD_PTR(dmabuf);
+IS_BAD_PTR(offset);
+IS_ZERO(size);
+return core::Runtime::runtime_singleton_->DmaBufExport(ptr, size, dmabuf,
+                                    offset, HSA_AMD_DMABUF_MAPPING_TYPE_NONE);
+CATCH;
+}
+
+hsa_status_t hsa_amd_portable_export_dmabuf_v2(const void* ptr, size_t size,
+                              int* dmabuf, uint64_t* offset, uint64_t flags) {
   TRY;
   IS_OPEN();
   IS_BAD_PTR(ptr);
   IS_BAD_PTR(dmabuf);
   IS_BAD_PTR(offset);
   IS_ZERO(size);
-  return core::Runtime::runtime_singleton_->DmaBufExport(ptr, size, dmabuf, offset);
+  return core::Runtime::runtime_singleton_->DmaBufExport(ptr, size,
+                                                      dmabuf, offset, flags);
   CATCH;
 }
 
@@ -1283,7 +1343,10 @@ hsa_status_t hsa_amd_vmem_address_reserve(void** va, size_t size, uint64_t addre
   TRY;
   IS_OPEN();
   IS_ZERO(size);
-  IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
+
+  if (!(flags & HSA_AMD_VMEM_ADDRESS_NO_REGISTER))
+    IS_TRUE(core::Runtime::runtime_singleton_->VirtualMemApiSupported());
+
   return core::Runtime::runtime_singleton_->VMemoryAddressReserve(va, size, address, 0, flags);
   CATCH;
 }

@@ -70,7 +70,7 @@ class Flag {
   const size_t DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC = (3 * (1UL<<30));  // 3 GB
   const size_t DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE = (256 * (1UL<<20)); //256 MB
 
-  explicit Flag() { Refresh(); }
+  Flag() {}
 
   virtual ~Flag() {}
 
@@ -257,7 +257,7 @@ class Flag {
     override_cpu_affinity_ = (var == "0") ? false : true;
 
     var = os::GetEnvVar("HSA_ALLOCATE_QUEUE_DEV_MEM");
-    dev_mem_queue_ = (var == "1") ? true : false;
+    dev_mem_queue_buf_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_WAIT_ANY_DEBUG");
     wait_any_ = (var == "1") ? true : false;
@@ -284,6 +284,12 @@ class Flag {
 
     var = os::GetEnvVar("HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG");
     enable_3d_swizzle_ = (var == "1") ? true : false;
+
+    // This allows convient usage in scripting for enabling dtif.
+    // IE the user should set HSA_DTIF_ENABLED = 1 to enable DTIF.
+    // HSA_DTIF_ENABLED = 0 will disable DTIF backend.
+    var = os::GetEnvVar("HSA_ENABLE_DTIF");
+    enable_dtif_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_CO_DMACOPY_SIZE");
     co_dmacopy_size_ = var.empty() ? 1024*1024 : atoi(var.c_str());
@@ -399,9 +405,9 @@ class Flag {
 
   size_t pc_sampling_max_device_buffer_size() const { return pc_sampling_max_device_buffer_size_; }
 
-  bool dev_mem_queue() const { return dev_mem_queue_; }
-
   size_t co_dmacopy_size() const { return co_dmacopy_size_; }
+
+  bool dev_mem_queue_buf() const { return dev_mem_queue_buf_; }
 
   uint32_t signal_abort_timeout() const { return signal_abort_timeout_; }
 
@@ -409,6 +415,7 @@ class Flag {
 
   bool enable_3d_swizzle() const { return enable_3d_swizzle_; }
 
+  bool enable_dtif() const { return enable_dtif_; }
  private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
@@ -438,10 +445,11 @@ class Flag {
   bool enable_mwaitx_;
   bool enable_ipc_mode_legacy_;
   bool wait_any_;
-  bool dev_mem_queue_;
+  bool dev_mem_queue_buf_;
   uint32_t signal_abort_timeout_;
   int  async_events_thread_priority_;
   bool enable_3d_swizzle_ = false;
+  bool enable_dtif_;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;

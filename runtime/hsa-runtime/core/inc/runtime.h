@@ -69,6 +69,7 @@
 #include "core/inc/memory_region.h"
 #include "core/inc/signal.h"
 #include "core/inc/svm_profiler.h"
+#include "core/inc/thunk_loader.h"
 #include "core/util/flag.h"
 #include "core/util/locks.h"
 #include "core/util/os.h"
@@ -90,6 +91,7 @@
 #define HSA_ARGUMENT_ALIGN_BYTES 16
 #define HSA_QUEUE_ALIGN_BYTES 64
 #define HSA_PACKET_ALIGN_BYTES 64
+#define HSA_MAX_DEP_SIGNALS 5
 
 //Avoids include
 namespace rocr {
@@ -283,6 +285,16 @@ class Runtime {
   hsa_status_t CopyMemoryStatus(core::Agent* dst_agent, core::Agent* src_agent,
                                 uint32_t *engine_ids_mask);
 
+  /// @brief Get preferred SDMA engine for the copy direction
+  ///
+  /// @param [in] dst_agent Destination agent.
+  /// @param [in] src_agent Source agent.
+  /// @param [out] recommended_ids_mask Mask of recommended_ids.
+  ///
+  /// @retval HSA_STATUS_SUCCESS For mask returned
+  hsa_status_t GetPreferredEngine(core::Agent* dst_agent, core::Agent* src_agent,
+                                  uint32_t* recommended_ids_mask);
+
   /// @brief Fill the first @p count of uint32_t in ptr with value.
   ///
   /// @param [in] ptr Memory address to be filled.
@@ -364,7 +376,8 @@ class Runtime {
   hsa_status_t SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent, uint32_t num_dep_signals,
                            const hsa_signal_t* dep_signals, hsa_signal_t completion_signal);
 
-  hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset);
+  hsa_status_t DmaBufExport(const void* ptr, size_t size, int* dmabuf,
+                                            uint64_t* offset, uint64_t flags);
 
   hsa_status_t DmaBufClose(int dmabuf);
 
@@ -442,6 +455,8 @@ class Runtime {
   }
 
   const Flag& flag() const { return flag_; }
+
+  const ThunkLoader* thunkLoader() const { return thunkLoader_; }
 
   ExtensionEntryPoints extensions_;
 
@@ -758,6 +773,8 @@ class Runtime {
   // Track environment variables.
   Flag flag_;
 
+  ThunkLoader* thunkLoader_;
+
   // Pools memory for SharedSignal (Signal ABI blocks)
   SharedSignalPool_t SharedSignalPool;
 
@@ -785,11 +802,14 @@ class Runtime {
   typedef void* ThunkHandle;
 
   struct AddressHandle {
-    AddressHandle() : size(0), use_count(0) {}
-    AddressHandle(size_t size) : size(size), use_count(0) {}
+    AddressHandle() : os_addr(nullptr), size(0), use_count(0), registered(false) {}
+    AddressHandle(void* addr, size_t _size, bool _registered) : os_addr(addr), size(_size), use_count(0), registered(_registered) {}
 
+    // Address returned by OS. May be different from user address when adjusted for alignment
+    void *os_addr;
     size_t size;
     int use_count;
+    bool registered;
   };
   std::map<const void*, AddressHandle> reserved_address_map_;  // Indexed by VA
 

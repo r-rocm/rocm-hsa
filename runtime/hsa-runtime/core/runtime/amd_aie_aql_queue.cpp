@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -53,6 +53,7 @@
 #include <Windows.h>
 #endif
 
+#include <atomic>
 #include <cstring>
 
 #include "core/inc/amd_xdna_driver.h"
@@ -64,10 +65,13 @@
 namespace rocr {
 namespace AMD {
 
-AieAqlQueue::AieAqlQueue(AieAgent *agent, size_t req_size_pkts,
-                         uint32_t node_id)
-    : Queue(0, 0), LocalSignal(0, false), DoorbellSignal(signal()),
-      agent_(*agent), active_(false) {
+AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
+                         uint32_t node_id, uint64_t flags)
+    : Queue(shared_queue, flags),
+      LocalSignal(0, false),
+      DoorbellSignal(signal()),
+      agent_(*agent),
+      active_(false) {
   if (agent_.device_type() != core::Agent::DeviceType::kAmdAieDevice) {
     throw AMD::hsa_exception(
         HSA_STATUS_ERROR_INVALID_AGENT,
@@ -98,14 +102,25 @@ AieAqlQueue::AieAqlQueue(AieAgent *agent, size_t req_size_pkts,
   signal_.queue_ptr = &amd_queue_;
   active_ = true;
 
-  auto &drv = static_cast<XdnaDriver &>(agent_.driver());
-  drv.CreateQueue(*this);
+  HsaQueueResource queue_resource = {};
+  hsa_status_t status =
+      agent_.driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 0, HSA_QUEUE_PRIORITY_NORMAL, 0,
+                                  nullptr, queue_size_bytes_, nullptr, queue_resource);
+  if (status != HSA_STATUS_SUCCESS) {
+    throw AMD::hsa_exception(status, "Failed to create a hardware context for an AIE queue.");
+  }
+
+  queue_id_ = queue_resource.QueueId;
+  amd_queue_.hsa_queue.id = GetQueueId();
 }
 
 AieAqlQueue::~AieAqlQueue() {
   AieAqlQueue::Inactivate();
   if (ring_buf_) {
     agent_.system_deallocator()(ring_buf_);
+  }
+  if (shared_queue_) {
+    core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
   }
 }
 
@@ -114,9 +129,7 @@ hsa_status_t AieAqlQueue::Inactivate() {
   hsa_status_t status(HSA_STATUS_SUCCESS);
 
   if (active) {
-    auto &drv = static_cast<XdnaDriver &>(agent_.driver());
-    status = drv.DestroyQueue(*this);
-    hw_ctx_handle_ = std::numeric_limits<uint32_t>::max();
+    agent_.driver().DestroyQueue(queue_id_);
   }
 
   return status;
@@ -195,55 +208,58 @@ uint64_t AieAqlQueue::AddWriteIndexAcqRel(uint64_t value) {
                      std::memory_order_acq_rel);
 }
 
-void AieAqlQueue::StoreRelaxed(hsa_signal_value_t value) {
-  auto& driver = static_cast<XdnaDriver&>(agent_.driver());
-  SubmitCmd(driver, amd_queue_.hsa_queue.base_address, amd_queue_.read_dispatch_id,
-            amd_queue_.write_dispatch_id);
-}
+void AieAqlQueue::StoreRelaxed(hsa_signal_value_t value) { SubmitPackets(); }
 
-hsa_status_t AieAqlQueue::SubmitCmd(XdnaDriver& driver, void* queue_base, uint64_t read_dispatch_id,
-                                    uint64_t write_dispatch_id) {
-  uint64_t cur_id = read_dispatch_id;
-  while (cur_id < write_dispatch_id) {
-    hsa_amd_aie_ert_packet_t* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + cur_id;
+void AieAqlQueue::SubmitPackets() {
+  if (!active_.load(std::memory_order_relaxed)) {
+    return;
+  }
+
+  auto& driver = static_cast<XdnaDriver&>(agent_.driver());
+  void* queue_base = amd_queue_.hsa_queue.base_address;
+
+  uint64_t cur_id = LoadReadIndexRelaxed();
+  const uint64_t end = LoadWriteIndexAcquire();
+  while (cur_id < end) {
+    auto* pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + cur_id;
 
     // Get the packet header information
     if (pkt->header.header != HSA_PACKET_TYPE_VENDOR_SPECIFIC ||
-        pkt->header.AmdFormat != HSA_AMD_PACKET_TYPE_AIE_ERT)
-      return HSA_STATUS_ERROR;
+        pkt->header.AmdFormat != HSA_AMD_PACKET_TYPE_AIE_ERT) {
+      assert(false && "Invalid packet header");
+    }
 
     // Get the payload information
     switch (pkt->opcode) {
       case HSA_AMD_AIE_ERT_START_CU: {
         // Iterating over future packets and seeing how many contiguous HSA_AMD_AIE_ERT_START_CU
         // packets there are. All can be combined into a single chain.
-        int num_cont_start_cu_pkts = 1;
-        int num_operands = 0;
-        for (int peak_pkt_id = cur_id + 1; peak_pkt_id < write_dispatch_id; peak_pkt_id++) {
-          hsa_amd_aie_ert_packet_t* peak_pkt =
-              static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_id;
+        uint64_t num_cont_start_cu_pkts = 1;
+        for (uint64_t peak_pkt_id = cur_id + 1; peak_pkt_id < end; peak_pkt_id++) {
+          auto* peak_pkt = static_cast<hsa_amd_aie_ert_packet_t*>(queue_base) + peak_pkt_id;
           if (peak_pkt->opcode != HSA_AMD_AIE_ERT_START_CU) {
             break;
           }
-          num_operands += GetOperandCount(peak_pkt->count);
           num_cont_start_cu_pkts++;
         }
 
-        // Call into the driver to submit from cur_id to write_dispatch_id
-        if (driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, num_operands, hw_ctx_handle_) !=
-            HSA_STATUS_SUCCESS)
-          return HSA_STATUS_ERROR;
+        // Call into the driver to submit from cur_id to write_dispatch_id.
+        // Submitting the command chain might create a new hardware context.
+        hsa_status_t status = driver.SubmitCmdChain(pkt, num_cont_start_cu_pkts, queue_id_,
+                                                    agent_.properties().NumNeuralCores);
+        if (status != HSA_STATUS_SUCCESS) {
+          assert(false && "Could not submit packets");
+        }
 
         cur_id += num_cont_start_cu_pkts;
         break;
       }
-      default: {
-        return HSA_STATUS_ERROR;
-      }
+      default:
+        break;
     }
   }
 
-  return HSA_STATUS_SUCCESS;
+  atomic::Store(&amd_queue_.read_dispatch_id, cur_id, std::memory_order_release);
 }
 
 void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {

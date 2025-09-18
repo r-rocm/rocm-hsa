@@ -48,6 +48,7 @@ cmake_minimum_required ( VERSION 3.7 )
 unset ( hsa-runtime64_LIB_DEPENDS CACHE )
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_CXX_STANDARD 17)
 
 ## Set core runtime module name and project name.
 set ( CORE_RUNTIME_NAME "hsa-runtime64" )
@@ -193,7 +194,7 @@ set ( SRCS core/driver/driver.cpp
            core/runtime/queue.cpp
            core/runtime/cache.cpp
            core/runtime/svm_profiler.cpp
-           core/common/shared.cpp
+           core/runtime/thunk_loader.cpp
            core/common/hsa_table_interface.cpp
            loader/executable.cpp
            libamdhsacode/amd_elf_image.cpp
@@ -246,9 +247,6 @@ if(${IMAGE_SUPPORT})
                    image/addrlib/src/core/addrlib3.cpp
                    image/addrlib/src/core/addrobject.cpp
                    image/addrlib/src/core/addrelemlib.cpp
-                   image/addrlib/src/r800/ciaddrlib.cpp
-                   image/addrlib/src/r800/egbaddrlib.cpp
-                   image/addrlib/src/r800/siaddrlib.cpp
                    image/addrlib/src/gfx9/gfx9addrlib.cpp
                    image/addrlib/src/gfx10/gfx10addrlib.cpp
                    image/addrlib/src/gfx11/gfx11addrlib.cpp
@@ -360,29 +358,6 @@ install ( FILES ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md DESTINATION ${CMAKE_INSTA
 
 # Install public headers
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/inc/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hsa COMPONENT dev )
-# Option to build header path migration helpers.
-option(INCLUDE_PATH_COMPATIBILITY "Generate backward compatible headers and include paths.  Use of these headers will warn when included." OFF)
-if(INCLUDE_PATH_COMPATIBILITY)
-# To enable/disable #error in wrapper header files
-  if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
-      if(DEFINED ENV{ROCM_HEADER_WRAPPER_WERROR})
-          set(ROCM_HEADER_WRAPPER_WERROR "$ENV{ROCM_HEADER_WRAPPER_WERROR}"
-                  CACHE STRING "Header wrapper warnings as errors.")
-      else()
-          set(ROCM_HEADER_WRAPPER_WERROR "OFF" CACHE STRING "Header wrapper warnings as errors.")
-      endif()
-  endif()
-  if(ROCM_HEADER_WRAPPER_WERROR)
-      set(deprecated_error 1)
-  else()
-      set(deprecated_error 0)
-  endif()
-
-  include(hsa-backward-compat.cmake)
-  target_include_directories( ${CORE_RUNTIME_TARGET}
-    PUBLIC
-    $<INSTALL_INTERFACE:hsa/include/hsa> )
-endif()
 
 ## Configure and install package config file
 # Record our usage data for clients find_package calls.

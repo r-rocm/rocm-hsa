@@ -3,7 +3,7 @@
 ## The University of Illinois/NCSA
 ## Open Source License (NCSA)
 ##
-## Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+## Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 ##
 ## Developed by:
 ##
@@ -47,7 +47,6 @@ cmake_minimum_required(VERSION 3.7)
 project("rocr")
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
-
 ## Expose static library option
 if ( NOT DEFINED BUILD_SHARED_LIBS )
   set ( BUILD_SHARED_LIBS ON )
@@ -87,7 +86,7 @@ include(utils)
 
 
 ## Get version strings
-get_version("1.15.0")
+get_version("1.18.0")
 if (${ROCM_PATCH_VERSION})
   set(VERSION_PATCH ${ROCM_PATCH_VERSION})
 endif()
@@ -98,8 +97,11 @@ if (NOT DEFINED BUILD_SHARED_LIBS)
 	set(BUILD_SHARED_LIBS ON)
 endif()
 
-# Set dependency for rocprofiler-register package
-set(HSA_DEP_ROCPROFILER_REGISTER ON CACHE INTERNAL "")
+# Set hsa pkg dependency with rocprofiler-register package
+# for Shared Library Only.
+if (BUILD_SHARED_LIBS)
+  set(HSA_DEP_ROCPROFILER_REGISTER ON CACHE INTERNAL "")
+endif()
 
 if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_DEBIAN_BINARY_PACKAGE_DEPENDS ", rocprofiler-register")

@@ -25,6 +25,7 @@
 
 #include "libhsakmt.h"
 #include "fmm.h"
+#include "hsakmt/hsakmtmodel.h"
 #include "hsakmt/linux/kfd_ioctl.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -2068,7 +2069,8 @@ HSAKMT_STATUS hsakmt_fmm_release(void *address)
 }
 
 static int fmm_set_memory_policy(uint32_t gpu_id, int default_policy, int alt_policy,
-				 uintptr_t alt_base, uint64_t alt_size)
+				 uintptr_t alt_base, uint64_t alt_size,
+				 uint32_t misc_process_flags)
 {
 	struct kfd_ioctl_set_memory_policy_args args = {0};
 
@@ -2077,6 +2079,7 @@ static int fmm_set_memory_policy(uint32_t gpu_id, int default_policy, int alt_po
 	args.alternate_policy = alt_policy;
 	args.alternate_aperture_base = alt_base;
 	args.alternate_aperture_size = alt_size;
+	args.misc_process_flag = misc_process_flags;
 
 	return hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_SET_MEMORY_POLICY, &args);
 }
@@ -2143,6 +2146,11 @@ int hsakmt_open_drm_render_device(int minor)
 	int index, fd;
 	uint32_t major_drm, minor_drm;
 	struct amdgpu_device **device_handle;
+
+	/* Bypass amdgpu if we're running a model. Return hsakmt_kfd_fd, which is the
+	 * backing for all our "GPU" memory. */
+	if (hsakmt_use_model)
+		return hsakmt_kfd_fd;
 
 	if (minor < DRM_FIRST_RENDER_NODE || minor > DRM_LAST_RENDER_NODE) {
 		pr_err("DRM render minor %d out of range [%d, %d]\n", minor,
@@ -2463,6 +2471,11 @@ static void *map_mmio(uint32_t node_id, uint32_t gpu_id, int mmap_fd)
 	vm_obj->node_id = node_id;
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
+	if (hsakmt_use_model) {
+		model_set_mmio_page(mem);
+		return mem;
+	}
+
 	/* Map for CPU access*/
 	ret = mmap(mem, PAGE_SIZE,
 			 PROT_READ | PROT_WRITE,
@@ -2503,6 +2516,11 @@ HSAKMT_STATUS hsakmt_fmm_get_amdgpu_device_handle(uint32_t node_id,
 
 	if (i < 0)
 		return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+	if (hsakmt_use_model) {
+		*DeviceHandle = NULL;
+		return HSAKMT_STATUS_SUCCESS;
+	}
 
 	index = gpu_mem[i].drm_render_minor - DRM_FIRST_RENDER_NODE;
 	if (!amdgpu_handle[index])
@@ -2581,10 +2599,10 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes)
 	uint32_t num_of_sysfs_nodes;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 	char *disableCache, *pagedUserptr, *checkUserptr, *guardPagesStr, *reserveSvm;
-	char *maxVaAlignStr;
+	char *maxVaAlignStr, *mfmaHighPrecisionModeStr;
 	unsigned int guardPages = 1;
 	uint64_t svm_base = 0, svm_limit = 0;
-	uint32_t svm_alignment = 0;
+	uint32_t svm_alignment = 0, mfma_high_precision_mode = 0;
 
 	/* If HSA_DISABLE_CACHE is set to a non-0 value, disable caching */
 	disableCache = getenv("HSA_DISABLE_CACHE");
@@ -2596,6 +2614,8 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes)
 	pagedUserptr = getenv("HSA_USERPTR_FOR_PAGED_MEM");
 	svm.userptr_for_paged_mem = (!pagedUserptr || strcmp(pagedUserptr, "0"));
 
+	if (hsakmt_use_model)
+		svm.userptr_for_paged_mem = false;
 	/* If HSA_CHECK_USERPTR is set to a non-0 value, check all userptrs
 	 * when they are registered
 	 */
@@ -2613,6 +2633,9 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes)
 	if (!guardPagesStr || sscanf(guardPagesStr, "%u", &guardPages) != 1)
 		guardPages = 1;
 
+	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
+	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
+				    strcmp(mfmaHighPrecisionModeStr, "0"));
 	/* Sets the max VA alignment order size during mapping. By default the order
 	 * size is set to 18(1G) for GFX950 to reduce TLB hits. If any non-gfx950
 	 * ASIC is found in the system, set back to 9(2MB).
@@ -2864,7 +2887,9 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes)
 						    KFD_IOC_CACHE_POLICY_COHERENT :
 						    KFD_IOC_CACHE_POLICY_NONCOHERENT,
 						    KFD_IOC_CACHE_POLICY_COHERENT,
-						    alt_base, alt_size);
+						    alt_base, alt_size,
+						    hsakmt_get_gfxv_by_node_id(i) == GFX_VERSION_GFX950 ?
+						    mfma_high_precision_mode : 0);
 			if (err) {
 				pr_err("Failed to set mem policy for GPU [0x%x]\n",
 				       process_apertures[i].gpu_id);
@@ -3384,15 +3409,16 @@ static int _fmm_unmap_from_gpu(manageable_aperture_t *aperture, void *address,
 			ret = tmp_ret;
 	}
 
-	remove_device_ids_from_mapped_array(object,
-			(uint32_t *)args.device_ids_array_ptr,
-			args.n_success * sizeof(uint32_t));
+	if (!ret) {
+		remove_device_ids_from_mapped_array(object,
+				(uint32_t *)args.device_ids_array_ptr,
+				args.n_success * sizeof(uint32_t));
 
-	if (object->mapped_node_id_array)
-		free(object->mapped_node_id_array);
-	object->mapped_node_id_array = NULL;
-	object->mapping_count = 0;
-
+		if (object->mapped_node_id_array)
+			free(object->mapped_node_id_array);
+		object->mapped_node_id_array = NULL;
+		object->mapping_count = 0;
+	}
 out:
 	if (!obj)
 		pthread_mutex_unlock(&aperture->fmm_mutex);
