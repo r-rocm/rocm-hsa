@@ -42,6 +42,7 @@
 
 #include "core/inc/intercept_queue.h"
 #include "core/inc/amd_aql_queue.h"
+#include "core/inc/default_signal.h"
 #include "core/util/utils.h"
 #include "inc/hsa_api_trace.h"
 
@@ -135,7 +136,10 @@ InterceptQueue::InterceptQueue(std::unique_ptr<Queue> queue)
   // Match the queue's signal ABI block to async_doorbell_'s
   // This allows us to use the queue's signal ABI block from devices to trigger async_doorbell while
   // host side use jumps directly to the queue's signal implementation.
-  async_doorbell_ = new InterruptSignal(DOORBELL_MAX);
+  if (!core::g_use_interrupt_wait)
+    async_doorbell_ = new DefaultSignal(DOORBELL_MAX);
+  else
+    async_doorbell_ = new InterruptSignal(DOORBELL_MAX);
   MAKE_NAMED_SCOPE_GUARD(sigGuard, [&]() { async_doorbell_->DestroySignal(); });
   this->signal_ = async_doorbell_->signal_;
   amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);
@@ -256,7 +260,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
       // Submit barrier which will wake async queue processing.
       ring[barrier & mask].packet.body = {};
       ring[barrier & mask].barrier_and.completion_signal = Signal::Convert(async_doorbell_);
-      if (Runtime::runtime_singleton_->flag().dev_mem_queue() && !needsPcieOrdering()) {
+      if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
         // Ensure the packet body is written as header may get reordered when writing over PCIE
         _mm_sfence();
       }
@@ -303,7 +307,7 @@ uint64_t InterceptQueue::Submit(const AqlPacket* packets, uint64_t count) {
         ++packets_index;
       }
       if (write_index != 0) {
-        if (Runtime::runtime_singleton_->flag().dev_mem_queue() && !needsPcieOrdering()) {
+        if (wrapped->IsDeviceMemRingBuf() && needsPcieOrdering()) {
           // Ensure the packet body is written as header may get reordered when writing over PCIE
           _mm_sfence();
         }
@@ -372,7 +376,7 @@ void InterceptQueue::StoreRelaxed(hsa_signal_value_t value) {
     Cursor.pkt_index = i;
     auto& handler = interceptors[Cursor.interceptor_index];
     handler.first(&ring[i & mask], 1, i, handler.second, PacketWriter);
-    if (Runtime::runtime_singleton_->flag().dev_mem_queue() && !needsPcieOrdering()) {
+    if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
       // Ensure the packet body is written as header may get reordered when writing over PCIE
       _mm_sfence();
     }

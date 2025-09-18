@@ -173,7 +173,7 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
 }
 
 void DiscoverAie(uint32_t node_id, HsaNodeProperties& node_prop) {
-  AieAgent* aie = new AieAgent(node_id);
+  AieAgent* aie = new AieAgent(node_id, node_prop);
   core::Runtime::runtime_singleton_->RegisterAgent(aie, true);
 }
 
@@ -266,6 +266,10 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
     // Obtain properties of the node
     hsa_status_t ret = gpu_driver.GetNodeProperties(node_prop, gpu_list[idx]);
     assert(ret == HSA_STATUS_SUCCESS && "Error in getting Node Properties");
+
+    // disable interrupt signal for DTIF platform
+    if (core::Runtime::runtime_singleton_->flag().enable_dtif())
+      core::g_use_interrupt_wait = false;
 
     // Instantiate a Gpu device. The IO links
     // of this node have already been registered
@@ -439,7 +443,7 @@ bool BuildTopology() {
           // Using one pcie sdma for device to device copy with limited XGMI SDMA engine.
           // This will help improve all to all copy with limited XGMI SDMA engine.
           if (rec_sdma_engine_override) {
-            uint32_t sdma_engine_mask = (1 << ((AMD::GpuAgent*)src_gpu)->properties().NumSdmaEngines - 1);
+            uint32_t sdma_engine_mask = (1 << (((AMD::GpuAgent*)src_gpu)->properties().NumSdmaEngines - 1));
             rec_sdma_eng_id_mask = !IsPowerOfTwo(rec_sdma_eng_id_mask) ?
               sdma_engine_mask : rec_sdma_eng_id_mask;
           }
@@ -462,6 +466,9 @@ bool Load() {
   if (core::Runtime::runtime_singleton_->AgentDrivers().empty()) return false;
 
   for (auto& d : core::Runtime::runtime_singleton_->AgentDrivers()) {
+    bool is_model_enabled = false;
+    d->IsModelEnabled(&is_model_enabled);
+    if (is_model_enabled) continue;
     if (!InitializeDriver(d)) return false;
   }
 

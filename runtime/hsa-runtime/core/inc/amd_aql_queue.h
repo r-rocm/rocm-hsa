@@ -63,9 +63,9 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   static __forceinline bool IsType(core::Queue* queue) { return queue->IsType(&rtti_id()); }
 
   // Acquires/releases queue resources and requests HW schedule/deschedule.
-  AqlQueue(GpuAgent* agent, size_t req_size_pkts, HSAuint32 node_id,
-           ScratchInfo& scratch, core::HsaEventCallback callback,
-           void* err_data, bool is_kv = false);
+  AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_size_pkts,
+           HSAuint32 node_id, ScratchInfo& scratch, core::HsaEventCallback callback, void* err_data,
+           uint64_t flags);
 
   ~AqlQueue();
 
@@ -236,7 +236,9 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
 
   // (De)allocates and (de)registers ring_buf_.
   void AllocRegisteredRingBuffer(uint32_t queue_size_pkts);
-  void FreeRegisteredRingBuffer();
+
+  /// @brief Frees the queue's packet ring buffer and its queue struct.
+  void FreeQueueMemory();
 
   /// @brief Abstracts the file handle use for double mapping queues.
   void CloseRingBufferFD(const char* ring_buf_shm_path, int fd) const;
@@ -291,13 +293,8 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   // Indicates if queue is active
   std::atomic<bool> active_;
 
-  // Cached value of HsaNodeProperties.HSA_CAPABILITY.DoorbellType
-  int doorbell_type_;
-
   // Handle of agent, which queue is attached to
   GpuAgent* agent_;
-
-  uint32_t queue_full_workaround_;
 
   // Handle of scratch memory descriptor
   ScratchInfo queue_scratch_;
@@ -305,9 +302,6 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   AMD::callback_t<core::HsaEventCallback> errors_callback_;
 
   void* errors_data_;
-
-  // Is KV device queue
-  bool is_kv_queue_;
 
   // GPU-visible indirect buffer holding PM4 commands.
   void* pm4_ib_buf_;

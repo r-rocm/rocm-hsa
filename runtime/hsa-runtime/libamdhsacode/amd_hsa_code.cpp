@@ -122,7 +122,9 @@ namespace code {
 
     hsa_status_t Symbol::GetInfo(hsa_code_symbol_info_t attribute, void *value)
     {
-      assert(value);
+      if (!value) {
+          return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
 
       switch (attribute) {
         case HSA_CODE_SYMBOL_INFO_TYPE: {
@@ -173,7 +175,7 @@ namespace code {
     std::string Symbol::GetSymbolName() const {
       std::string FullName = Name();
       return FullName.rfind(":") != std::string::npos ?
-        FullName.substr(FullName.rfind(":") + 1) : FullName;
+        FullName.substr(FullName.rfind(":") + 1) : std::move(FullName);
     }
 
     hsa_code_symbol_t Symbol::ToHandle(Symbol* sym)
@@ -585,8 +587,6 @@ namespace code {
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX909:  MI.Name = "gfx909";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX90A:  MI.Name = "gfx90a";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX90C:  MI.Name = "gfx90c";  MI.XnackSupported = true;  MI.SrameccSupported = false; break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX940:  MI.Name = "gfx940";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
-      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX941:  MI.Name = "gfx941";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX942:  MI.Name = "gfx942";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX950:  MI.Name = "gfx950";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010: MI.Name = "gfx1010"; MI.XnackSupported = true;  MI.SrameccSupported = false; break;
@@ -920,7 +920,10 @@ namespace code {
 
     hsa_status_t AmdHsaCode::GetSymbol(const char *module_name, const char *symbol_name, hsa_code_symbol_t *s)
     {
-      std::string mname = MangleSymbolName(module_name ? module_name : "", symbol_name);
+      std::string mname = MangleSymbolName(
+        std::string(module_name ? module_name : ""),
+        std::string(symbol_name)
+      );
       for (Symbol* sym : symbols) {
         if (sym->Name() == mname) {
           *s = Symbol::ToHandle(sym);
@@ -1729,7 +1732,7 @@ namespace code {
       out << std::dec;
     }
 
-    std::string AmdHsaCode::MangleSymbolName(const std::string& module_name, const std::string symbol_name)
+    std::string AmdHsaCode::MangleSymbolName(const std::string& module_name, const std::string& symbol_name)
     {
       if (module_name.empty()) {
         return symbol_name;

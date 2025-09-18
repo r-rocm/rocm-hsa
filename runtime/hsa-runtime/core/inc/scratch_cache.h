@@ -43,7 +43,6 @@
 #ifndef HSA_RUNTIME_CORE_INC_SCRATCH_CACHE_H_
 #define HSA_RUNTIME_CORE_INC_SCRATCH_CACHE_H_
 
-#include "core/inc/amd_gpu_agent.h"
 #include "core/util/locks.h"
 #include "core/util/utils.h"
 
@@ -126,7 +125,7 @@ class ScratchCache {
   ScratchCache& operator=(const ScratchCache& rhs) = delete;
   ScratchCache& operator=(ScratchCache&& rhs) = delete;
 
-  ScratchCache(deallocator_t deallocator) : dealloc(deallocator), available_bytes_(0) {}
+  ScratchCache(deallocator_t deallocator) : dealloc(std::move(deallocator)), available_bytes_(0) {}
 
   ~ScratchCache() { assert(map.empty() && "ScratchCache not empty at shutdown."); }
 

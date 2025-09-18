@@ -50,6 +50,7 @@
 #include <fstream>
 #include <memory>
 #include "core/util/utils.h"
+#include "core/inc/runtime.h"
 #include "./amd_hsa_code_util.hpp"
 #include "core/inc/amd_core_dump.hpp"
 #include "hsakmt/hsakmt.h"
@@ -118,14 +119,15 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     uint32_t runtime_size, agents_size, queue_size, n_entries, entry_size;
     HsaVersionInfo versionInfo = {0};
 
-    if (hsaKmtDbgEnable(&runtime_ptr, &runtime_size)) {
+    if (HSAKMT_CALL(hsaKmtDbgEnable(&runtime_ptr, &runtime_size))) {
       fprintf(stderr, "Failed to enable debug interface, "
               "debugger might be already attached.\n");
       return HSA_STATUS_ERROR;
     }
     std::unique_ptr<void, decltype(std::free) *> runtime_info(runtime_ptr, std::free);
 
-    if (hsaKmtGetVersion(&versionInfo)) {
+    if (HSAKMT_CALL(hsaKmtGetVersion(&versionInfo))) {
+      HSAKMT_CALL(hsaKmtDbgDisable());
       fprintf(stderr, "Failed to fetch driver ABI version.\n");
       return HSA_STATUS_ERROR;
     }
@@ -138,7 +140,8 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store runtime_info_size in PT_NOTE package */
     note_package_builder_.Write<uint64_t>(runtime_size);
 
-    if (hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size)) {
+    if (HSAKMT_CALL(hsaKmtDbgGetDeviceData(&agents_ptr, &n_entries, &entry_size))) {
+       HSAKMT_CALL(hsaKmtDbgDisable());
        fprintf(stderr, "Failed to fetch agents snapshot.\n");
        return HSA_STATUS_ERROR;
     }
@@ -149,7 +152,8 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     /* Store agent_info_entry_size in PT_NOTE package */
     note_package_builder_.Write<uint32_t>(entry_size);
 
-    if (hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true)) {
+    if (HSAKMT_CALL(hsaKmtDbgGetQueueData(&queues_ptr, &n_entries, &entry_size, true))) {
+       HSAKMT_CALL(hsaKmtDbgDisable());
        fprintf(stderr, "Failed to fetch queues snapshot.\n");
        return HSA_STATUS_ERROR;
     }
@@ -163,7 +167,7 @@ struct NoteSegmentBuilder : public SegmentBuilder {
     PushInfo(runtime_info.get(), runtime_size);
     PushInfo(agents_info.get(), agents_size);
     PushInfo(queues_info.get(), queue_size);
-    if (hsaKmtDbgDisable()) {
+    if (HSAKMT_CALL(hsaKmtDbgDisable())) {
       fprintf(stderr, "Failed to disable debug interface.\n");
       return HSA_STATUS_ERROR;
     }
@@ -291,19 +295,13 @@ struct LoadSegmentBuilder : public SegmentBuilder {
   int fd_ = -1;
 };
 
-hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& segments) {
+hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& segments, size_t size_limit) {
   std::unique_ptr<unsigned char[]> copy_buffer(new unsigned char[MAX_BUFFER_SIZE]);
-  struct rlimit rlimit;
-
-  if (getrlimit(RLIMIT_CORE, &rlimit)) {
-    perror("Could not get core file size\n");
-    return HSA_STATUS_ERROR;
-  }
-  debug_print("core file size: %ld\n", rlimit.rlim_cur);
   if (!segments.size()) return HSA_STATUS_SUCCESS;
   SegmentInfo front = segments.front();
   off_t offset = sizeof(Elf64_Ehdr) + segments.size() * sizeof(Elf64_Phdr);
-  if (rlimit.rlim_cur != -1 && (offset + front.size > rlimit.rlim_cur)) {
+
+  if (size_limit != -1 && (offset + front.size > size_limit)) {
     debug_print("Core file size over limit\n");
     return HSA_STATUS_SUCCESS;
   }
@@ -379,7 +377,7 @@ hsa_status_t build_core_dump(const std::string& filename, const SegmentsInfo& se
           return (uint32_t)0;
       }
     }(seg.stype);
-    if (rlimit.rlim_cur != -1 && (offset + seg.size > rlimit.rlim_cur)) {
+    if (size_limit != -1 && (offset + seg.size > size_limit)) {
       printf("Core limit file reached. GPU core dump created: %s\n", filename.c_str());
       close(fd);
       return HSA_STATUS_SUCCESS;
@@ -434,6 +432,17 @@ hsa_status_t dump_gpu_core() {
   impl::LoadSegmentBuilder lbuilder;
   impl::SegmentsInfo segments;
 
+  struct rlimit rlimit;
+
+  if (getrlimit(RLIMIT_CORE, &rlimit)) {
+    perror("Could not get core file size\n");
+    return HSA_STATUS_ERROR;
+  }
+  debug_print("core file size: %ld\n", rlimit.rlim_cur);
+
+  if (rlimit.rlim_cur == 0)
+    return HSA_STATUS_SUCCESS;
+
   hsa_status_t status = nbuilder.Collect(segments);
   if (status != HSA_STATUS_SUCCESS) return status;
 
@@ -442,7 +451,7 @@ hsa_status_t dump_gpu_core() {
 
   std::stringstream st;
   st << PREFIX_FILE_NAME << "." << getpid();
-  return build_core_dump(st.str(), segments);
+  return build_core_dump(st.str(), segments, rlimit.rlim_cur);
 }
 }   //  namespace coredump
 }   //  namespace amd

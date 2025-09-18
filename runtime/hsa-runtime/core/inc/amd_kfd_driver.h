@@ -61,10 +61,21 @@ class Queue;
 
 namespace AMD {
 
+/// @brief AMD Kernel Fusion Driver (KFD) for AMD GPU and CPU agents.
+///
+/// @details The user-mode driver into the Linux KFD for AMD GPU and CPU HSA
+/// agents. Provides APIs for the ROCr core to discover the topology produced
+/// by the KFD, allocate memory out of the KFD, manage DMA bufs, allocate queues,
+/// and more.
 class KfdDriver final : public core::Driver {
 public:
   KfdDriver(std::string devnode_name);
 
+  /// @brief Determine of the KFD is present on the system and attemp to open it if found.
+  ///
+  /// @param[out] Driver object for the KFD.
+  /// @return HSA_STATUS_SUCCESS if driver found and opened.
+  /// @return HSA_STATUS_ERROR if unable to find or open the KFD.
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
   hsa_status_t Init() override;
@@ -76,17 +87,26 @@ public:
   hsa_status_t GetNodeProperties(HsaNodeProperties& node_props, uint32_t node_id) const override;
   hsa_status_t GetEdgeProperties(std::vector<HsaIoLinkProperties>& io_link_props,
                                  uint32_t node_id) const override;
-  hsa_status_t GetAgentProperties(core::Agent &agent) const override;
-  hsa_status_t
-  GetMemoryProperties(uint32_t node_id,
-                      core::MemoryRegion &mem_region) const override;
+  hsa_status_t GetMemoryProperties(uint32_t node_id,
+                                   std::vector<HsaMemoryProperties>& mem_props) const override;
+  hsa_status_t GetCacheProperties(uint32_t node_id, uint32_t processor_id,
+                                  std::vector<HsaCacheProperties>& cache_props) const override;
   hsa_status_t AllocateMemory(const core::MemoryRegion &mem_region,
                               core::MemoryRegion::AllocateFlags alloc_flags,
                               void **mem, size_t size,
                               uint32_t node_id) override;
   hsa_status_t FreeMemory(void *mem, size_t size) override;
-  hsa_status_t CreateQueue(core::Queue &queue) const override;
-  hsa_status_t DestroyQueue(core::Queue &queue) const override;
+  hsa_status_t CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
+                           HSA_QUEUE_PRIORITY priority, uint32_t sdma_engine_id, void* queue_addr,
+                           uint64_t queue_size_bytes, HsaEvent* event,
+                           HsaQueueResource& queue_resource) const override;
+  hsa_status_t UpdateQueue(HSA_QUEUEID queue_id, uint32_t queue_pct, HSA_QUEUE_PRIORITY priority,
+                           void* queue_addr, uint64_t queue_size, HsaEvent* event) const override;
+  hsa_status_t DestroyQueue(HSA_QUEUEID queue_id) const override;
+  hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
+                              uint32_t* queue_cu_mask) const override;
+  hsa_status_t AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
+                             uint32_t* first_gws) const override;
   hsa_status_t ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
                             size_t *offset) override;
   hsa_status_t ImportDMABuf(int dmabuf_fd, core::Agent &agent,
@@ -97,7 +117,19 @@ public:
                      size_t size) override;
   hsa_status_t ReleaseShareableHandle(core::ShareableHandle &handle) override;
 
-private:
+  hsa_status_t SPMAcquire(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMRelease(uint32_t preferred_node_id) const override;
+  hsa_status_t SPMSetDestBuffer(uint32_t preferred_node_id, uint32_t size_bytes, uint32_t* timeout,
+                                uint32_t* size_copied, void* dest_mem_addr,
+                                bool* is_spm_data_loss) const override;
+  hsa_status_t SetTrapHandler(uint32_t node_id, const void* base, uint64_t base_size,
+                              const void* buffer_base, uint64_t buffer_base_size) const override;
+
+  hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
+
+  hsa_status_t IsModelEnabled(bool* enable) const override;
+
+ private:
   /// @brief Allocate agent accessible memory (system / local memory).
   static void *AllocateKfdMemory(const HsaMemFlags &flags, uint32_t node_id,
                                  size_t size);

@@ -195,10 +195,9 @@ hsa_status_t BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>:
   // boolean flag
   const HSA_QUEUE_TYPE kQueueType_ = rec_eng >= 0 ? HSA_QUEUE_SDMA_BY_ENG_ID :
                                      (use_xgmi ? HSA_QUEUE_SDMA_XGMI : HSA_QUEUE_SDMA);
-  if (HSAKMT_STATUS_SUCCESS != hsaKmtCreateQueueExt(agent_->node_id(), kQueueType_, 100,
-                                                    HSA_QUEUE_PRIORITY_MAXIMUM, rec_eng,
-                                                    queue_start_addr_, kQueueSize, NULL,
-                                                    &queue_resource_)) {
+  if (agent_->driver().CreateQueue(agent_->node_id(), kQueueType_, 100, HSA_QUEUE_PRIORITY_MAXIMUM,
+                                   rec_eng, queue_start_addr_, kQueueSize, nullptr,
+                                   queue_resource_) != HSA_STATUS_SUCCESS) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -226,8 +225,8 @@ hsa_status_t BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>:
 
   if (queue_resource_.QueueId != 0) {
     // Release queue resources from the kernel
-    auto err = hsaKmtDestroyQueue(queue_resource_.QueueId);
-    assert(err == HSAKMT_STATUS_SUCCESS);
+    auto err = agent_->driver().DestroyQueue(queue_resource_.QueueId);
+    assert(err == HSA_STATUS_SUCCESS);
     memset(&queue_resource_, 0, sizeof(queue_resource_));
   }
 
@@ -287,7 +286,7 @@ hsa_status_t BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>:
   uint32_t num_poll_command = 0;
 
   // Cached copy of dep_signals[i]->LoadRelaxed
-  uint64_t dep_signals_value[dep_signals.size()];
+  uint64_t dep_signals_value[HSA_MAX_DEP_SIGNALS];
 
   for (size_t i = 0; i < dep_signals.size(); ++i) {
     // The signal is 64 bit value, and poll checks for 32 bit value.
@@ -646,7 +645,7 @@ BlitSdma<RingIndexTy, HwIndexMonotonic, SizeToCountOffset, useGCR>::SubmitCopyRe
     BuildCopyRectCommand(append, dst, dst_offset, src, src_offset, range);
   }
 
-  uint64_t size = range->x * range->y * range->z;
+  uint64_t size = static_cast<uint64_t>(range->x) * static_cast<uint64_t>(range->y) * range->z;
 
   std::vector<core::Signal*> gang_signals(0);
 

@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2022-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2022-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -55,13 +55,12 @@
 namespace rocr {
 namespace AMD {
 
-AieAgent::AieAgent(uint32_t node)
-    : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(
-                      core::DriverType::XDNA),
-                  node, core::Agent::DeviceType::kAmdAieDevice) {
+AieAgent::AieAgent(uint32_t node, const HsaNodeProperties& node_props)
+    : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::XDNA), node,
+                  core::Agent::DeviceType::kAmdAieDevice),
+      node_props_(node_props) {
   InitRegionList();
   InitAllocators();
-  GetAgentProperties();
 }
 
 AieAgent::~AieAgent() {
@@ -76,7 +75,10 @@ hsa_status_t AieAgent::VisitRegion(bool include_peer,
   AMD::callback_t<decltype(callback)> call(callback);
   for (const auto r : regions_) {
     hsa_region_t region_handle(core::MemoryRegion::Convert(r));
-    call(region_handle, data);
+    hsa_status_t err = call(region_handle, data);
+    if (err != HSA_STATUS_SUCCESS) {
+      return err;
+    }
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -99,8 +101,8 @@ hsa_status_t AieAgent::IterateSupportedIsas(
                                                           void* data) const {
   AMD::callback_t<decltype(callback)> call(callback);
   for (const auto& isa : supported_isas()) {
-    hsa_status_t stat = call(core::Isa::Handle(isa), data);
-    if (stat != HSA_STATUS_SUCCESS) return stat;
+    hsa_status_t err = call(core::Isa::Handle(isa), data);
+    if (err != HSA_STATUS_SUCCESS) return err;
   }
   return HSA_STATUS_SUCCESS;
 }
@@ -250,6 +252,9 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
   case HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES:
     std::memset(value, 0, sizeof(uint8_t) * 8);
     break;
+  case HSA_AMD_AGENT_INFO_CLOCK_COUNTERS:
+    std::memset(value, 0, sizeof(hsa_amd_clock_counters_t));
+    break;
   default:
     *reinterpret_cast<uint32_t *>(value) = 0;
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -258,11 +263,16 @@ hsa_status_t AieAgent::GetInfo(hsa_agent_info_t attribute, void *value) const {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
-                                   core::HsaEventCallback event_callback,
-                                   void *data, uint32_t private_segment_size,
-                                   uint32_t group_segment_size,
-                                   core::Queue **queue) {
+hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
+                                   core::HsaEventCallback event_callback, void* data,
+                                   uint32_t private_segment_size, uint32_t group_segment_size,
+                                   core::Queue** queue) {
+  if ((flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) != 0 ||
+      (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0) {
+    // AIE agents do not currently support queue creation in device memory.
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
   if (!IsPowerOfTwo(size)) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
@@ -271,7 +281,18 @@ hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type,
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  auto aql_queue(new AieAqlQueue(this, size, node_id()));
+  core::SharedQueue* shared_queue =
+      static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
+          sizeof(core::SharedQueue), MemoryRegion::GetPageSize(), 0, node_id()));
+
+  if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  auto aql_queue(new AieAqlQueue(shared_queue, this, size, node_id(), flags));
+  if (aql_queue == nullptr) {
+    core::Runtime::runtime_singleton_->system_deallocator()(shared_queue);
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
   *queue = aql_queue;
 
   return HSA_STATUS_SUCCESS;
@@ -310,11 +331,6 @@ void AieAgent::InitRegionList() {
       new MemoryRegion(false, false, false, false, true, this, dev_mem_props));
   regions_.push_back(new MemoryRegion(false, false, false, false, true, this,
                                       other_mem_props));
-}
-
-void AieAgent::GetAgentProperties() {
-  auto &drv = static_cast<XdnaDriver &>(driver());
-  drv.GetAgentProperties(*this);
 }
 
 void AieAgent::InitAllocators() {

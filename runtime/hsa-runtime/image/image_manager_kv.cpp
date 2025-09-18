@@ -48,10 +48,12 @@
 #include <algorithm>
 #include <climits>
 
+#include "core/inc/runtime.h"
 #include "hsakmt/hsakmt.h"
 #include "inc/hsa_ext_amd.h"
 #include "core/inc/hsa_internal.h"
 #include "core/inc/hsa_ext_amd_impl.h"
+#include "core/inc/runtime.h"
 #include "addrlib/inc/addrinterface.h"
 #include "addrlib/src/core/addrlib.h"
 #include "image_runtime.h"
@@ -108,7 +110,7 @@ hsa_status_t ImageManagerKv::Initialize(hsa_agent_t agent_handle) {
   status = HSA::hsa_agent_get_info(
       agent_, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id);
   assert(status == HSA_STATUS_SUCCESS);
-  HSAKMT_STATUS stat = hsaKmtGetTileConfig(node_id, &tileConfig);
+  HSAKMT_STATUS stat = HSAKMT_CALL(hsaKmtGetTileConfig(node_id, &tileConfig));
   assert(stat == HSAKMT_STATUS_SUCCESS);
 
   // Initialize address library.
@@ -858,8 +860,33 @@ bool ImageManagerKv::GetAddrlibSurfaceInfo(
     case HSA_EXT_IMAGE_GEOMETRY_3D:
     case HSA_EXT_IMAGE_GEOMETRY_2DA:
     case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH:
-      in.resourceType = ADDR_RSRC_TEX_3D;
-      break;
+      {
+	      in.resourceType = ADDR_RSRC_TEX_3D;
+	      /*
+	       * 3D swizzle modes enforce alignment
+	       * of the number of slices  to the block depth.
+	       * If numSlices = 3 then the 3 slices are
+	       * interleaved for 3D locality among the 8 slices
+	       * that make up each block. This causes the memory
+	       * footprint to jump to a 3x size of the ideal size
+	       * 'enable3DSwizzleMode' flag tests for env variable
+	       * HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG to enable or disable
+	       * 3D swizzle:
+	       * true: Keep view3dAs2dArray = 0 for real 3D interleaving.
+	       * false: Use view3dAs2dArray = 1 to avoid the alignment
+	       *       expansion.
+	       * 2D swizzle modes can lower size overhead but may yield
+	       * suboptimal cache behavior for fully 3D volumetric
+	       * operations.
+	       */
+	      bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
+	      if (enable3DSwizzleMode)
+		      in.flags.view3dAs2dArray = 0;
+	      else
+		      in.flags.view3dAs2dArray = 1;
+
+	      break;
+      }
     }
     in.flags.texture = 1;
 

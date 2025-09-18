@@ -63,12 +63,18 @@ class QueueWrapper : public Queue {
  public:
   std::unique_ptr<Queue> wrapped;
 
-  explicit QueueWrapper(std::unique_ptr<Queue> queue) : Queue(), wrapped(std::move(queue)) {
+  explicit QueueWrapper(std::unique_ptr<Queue> queue)
+      : Queue(static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
+                  sizeof(core::SharedQueue), 4096, 0, 0)),
+              0),
+        wrapped(std::move(queue)) {
     memcpy(&amd_queue_, &wrapped->amd_queue_, sizeof(amd_queue_));
     wrapped->set_public_handle(wrapped.get(), public_handle_);
   }
 
-  ~QueueWrapper() {}
+  ~QueueWrapper() {
+    if (shared_queue_) core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
+  }
 
   hsa_status_t Inactivate() override { return wrapped->Inactivate(); }
   hsa_status_t SetPriority(HSA_QUEUE_PRIORITY priority) override {
@@ -226,7 +232,7 @@ class InterceptQueue : public QueueProxy, private LocalSignal, public DoorbellSi
   bool IsPendingRetryPoint(uint64_t wrapped_current_read_index) const;
 
   // Event signal to use for async packet processing and control flag.
-  InterruptSignal* async_doorbell_;
+  Signal* async_doorbell_;
   std::atomic<bool> quit_;
 
   // Indicates queue active/inactive state.

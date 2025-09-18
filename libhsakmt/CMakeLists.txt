@@ -116,6 +116,7 @@ set ( HSAKMT_SRC "src/debug.c"
                  "src/events.c"
                  "src/fmm.c"
                  "src/globals.c"
+                 "src/hsakmtmodel.c"
                  "src/libhsakmt.c"
                  "src/memory.c"
                  "src/openclose.c"
@@ -158,13 +159,20 @@ get_os_info()
 find_package(PkgConfig)
 # Check for libraries required for building
 find_library(LIBC NAMES c REQUIRED)
-find_library(NUMA NAMES numa REQUIRED)
-message(STATUS "LIBC:" ${LIBC})
-message(STATUS "NUMA:" ${NUMA})
+find_package(NUMA)
+if(NUMA_FOUND)
+  set(NUMA "${NUMA_LIBRARIES}")
+else()
+  find_library(NUMA NAMES numa REQUIRED)
+endif()
+message(STATUS "LIBC: " ${LIBC})
+message(STATUS "NUMA: " ${NUMA})
 
 ## If environment variable DRM_DIR is set, the script
 ## will pick up the corresponding libraries from that path.
-list (PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
+if(DRM_DIR)
+  list (PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
+endif()
 
 # The module name passed to pkg_check_modules() is determined by the
 # name of file *.pc
@@ -174,10 +182,18 @@ include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
 include_directories(${DRM_INCLUDE_DIRS})
 
 target_link_libraries ( ${HSAKMT_TARGET}
-  PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt c numa ${CMAKE_DL_LIBS}
+  PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt ${LIBC} ${NUMA} ${CMAKE_DL_LIBS}
 )
 
 target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
+
+include(CheckFunctionExists)
+set(CMAKE_REQUIRED_DEFINITIONS -D__USE_GNU=1)
+set(CMAKE_REQUIRED_INCLUDES sys/mman.h)
+check_function_exists(memfd_create HAVE_MEMFD_CREATE)
+if(HAVE_MEMFD_CREATE)
+  target_compile_definitions(${HSAKMT_TARGET} PRIVATE -DHAVE_MEMFD_CREATE=1)
+endif()
 
 ## Define default paths and packages.
 if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
@@ -197,26 +213,6 @@ install ( TARGETS ${HSAKMT_TARGET}
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   COMPONENT dev PATTERN "linux" EXCLUDE )
 
-# Option to build header path migration helpers.
-option(INCLUDE_PATH_COMPATIBILITY "Generate backward compatible headers and include paths.  Use of these headers will warn when included." OFF)
-
-if(INCLUDE_PATH_COMPATIBILITY)
-  # To enable/disable #error in wrapper header files
-  if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
-      if(DEFINED ENV{ROCM_HEADER_WRAPPER_WERROR})
-          set(ROCM_HEADER_WRAPPER_WERROR "$ENV{ROCM_HEADER_WRAPPER_WERROR}"
-                  CACHE STRING "Header wrapper warnings as errors.")
-      else()
-          set(ROCM_HEADER_WRAPPER_WERROR "OFF" CACHE STRING "Header wrapper warnings as errors.")
-      endif()
-  endif()
-  if(ROCM_HEADER_WRAPPER_WERROR)
-      set(deprecated_error 1)
-  else()
-      set(deprecated_error 0)
-  endif()
-  include(hsakmt-backward-compat.cmake)
-endif()
 # Record our usage data for clients find_package calls.
 install ( EXPORT ${HSAKMT_TARGET}Targets
   FILE ${HSAKMT_TARGET}Targets.cmake

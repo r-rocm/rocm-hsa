@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -86,6 +86,8 @@ class GpuAgentInt : public core::Agent {
    //
    // @retval HSA_STATUS_SUCCESS if initialization is successful.
    virtual hsa_status_t PostToolsInit() = 0;
+
+   virtual void ReleaseResources() = 0;
 
    // @brief Invoke the user provided callback for each region accessible by
    // this agent.
@@ -171,11 +173,6 @@ class GpuAgentInt : public core::Agent {
 
    virtual void SetRecSdmaEngOverride(bool flag) = 0;
 
-   // @brief Query if agent represent Kaveri GPU.
-   //
-   // @retval true if agent is Kaveri GPU.
-   virtual bool is_kv_device() const = 0;
-
    // @brief Query the agent HSA profile.
    //
    // @retval HSA profile.
@@ -238,6 +235,9 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief GPU agent destructor.
   ~GpuAgent();
+
+  // @brief Release allocated resources and disables agent
+  void ReleaseResources() override;
 
   // @brief Ensure blits are ready (performance hint).
   void PreloadBlits() override;
@@ -307,6 +307,10 @@ class GpuAgent : public GpuAgentInt {
                              uint32_t *engine_ids_mask) override;
 
   // @brief Override from core::Agent.
+  hsa_status_t DmaPreferredEngine(core::Agent& dst_agent, core::Agent& src_agent,
+                                  uint32_t* recommended_ids_mask) override;
+
+  // @brief Override from core::Agent.
   hsa_status_t DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
                            const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
                            const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
@@ -319,10 +323,9 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t GetInfo(hsa_agent_info_t attribute, void* value) const override;
 
   // @brief Override from core::Agent.
-  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type,
+  hsa_status_t QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                            core::HsaEventCallback event_callback, void* data,
-                           uint32_t private_segment_size,
-                           uint32_t group_segment_size,
+                           uint32_t private_segment_size, uint32_t group_segment_size,
                            core::Queue** queue) override;
 
   // @brief Decrement GWS ref count.
@@ -395,9 +398,6 @@ class GpuAgent : public GpuAgentInt {
                                                       return supported_isas_;}
 
   // @brief Override from AMD::GpuAgentInt.
-  __forceinline bool is_kv_device() const override { return is_kv_device_; }
-
-  // @brief Override from AMD::GpuAgentInt.
   __forceinline hsa_profile_t profile() const override { return profile_; }
 
   // @brief Override from AMD::GpuAgentInt.
@@ -427,7 +427,7 @@ class GpuAgent : public GpuAgentInt {
     if (t0_.GPUClockCounter == t1_.GPUClockCounter) SyncClocks();
   }
 
-  // @brief Override from AMD::GpuAgentInt.
+  /// @brief Override from AMD::GpuAgentInt.
   __forceinline bool is_xgmi_cpu_gpu() const { return xgmi_cpu_gpu_; }
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
@@ -439,6 +439,7 @@ class GpuAgent : public GpuAgentInt {
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
       _mm_mfence();
       auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
+      UNUSED(readback);
     }
   }
 
@@ -453,11 +454,14 @@ class GpuAgent : public GpuAgentInt {
   // @brief Returns true if scratch reclaim is enabled
   __forceinline bool AsyncScratchReclaimEnabled() const override {
     const uint32_t GFX94X_MIN_CP_FW_VERSION_REQUIRED = 177;
-    // TODO: Need to update min CP FW ucode version once it is released
+    const uint32_t GFX95X_MIN_CP_FW_VERSION_REQUIRED = 24;
+
     return (core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
-            supported_isas()[0]->GetMajorVersion() == 9 &&
-            supported_isas()[0]->GetMinorVersion() >= 4 &&
-            properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
+	    supported_isas()[0]->GetMajorVersion() == 9 &&
+	    ((supported_isas()[0]->GetMinorVersion() == 4 &&
+	      properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED) ||
+	     (supported_isas()[0]->GetMinorVersion() == 5 &&
+	      properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED)));
   };
 
   hsa_status_t SetAsyncScratchThresholds(size_t use_once_limit) override;
@@ -481,6 +485,18 @@ class GpuAgent : public GpuAgentInt {
   }
 
   const std::function<void(void*)>& finegrain_deallocator() const { return finegrain_deallocator_; }
+
+  /// @brief Allocate coarse grain device memory on this GPU agent.
+  const std::function<void*(size_t size, core::MemoryRegion::AllocateFlags flags)>&
+  coarsegrain_allocator() const {
+    return coarsegrain_allocator_;
+  }
+
+  /// @brief Deallocate memory allocated from the coarsegrain_allocator
+  /// on this GPU agent.
+  const std::function<void(void*)>& coarsegrain_deallocator() const {
+    return coarsegrain_deallocator_;
+  }
 
  protected:
   // Sizes are in packets.
@@ -525,7 +541,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Binds the second-level trap handler to this node.
   void BindTrapHandler();
-  hsa_status_t UpdateTrapHandlerWithPCS(void* pcs_hosttrap_buffers, void* stochastic_hosttrap_buffers);
 
   // @brief Override from core::Agent.
   hsa_status_t EnableDmaProfiling(bool enable) override;
@@ -539,10 +554,7 @@ class GpuAgent : public GpuAgentInt {
   hsa_status_t PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& session) override;
   hsa_status_t PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& session) override;
-  hsa_status_t PcSamplingFlushHostTrapDeviceBuffers(pcs::PcsRuntime::PcSamplingSession& session);
-
-  static void PcSamplingThreadRun(void* agent);
-  void PcSamplingThread();
+  hsa_status_t PcSamplingFlushDeviceBuffers(pcs::PcsRuntime::PcSamplingSession& session);
 
   // @brief Node properties.
   const HsaNodeProperties properties_;
@@ -628,8 +640,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief HSA profile.
   hsa_profile_t profile_;
-
-  bool is_kv_device_;
 
   void* trap_code_buf_;
 
@@ -738,16 +748,19 @@ class GpuAgent : public GpuAgentInt {
 
   ScratchCache scratch_cache_;
 
-  // System memory allocator in the nearest NUMA node.
+  /// @brief System memory allocator in the nearest NUMA node.
   std::function<void*(size_t size, size_t align, core::MemoryRegion::AllocateFlags flags)>
       system_allocator_;
-
+  /// @brief System memory deallocator in the nearest NUMA node.
   std::function<void(void*)> system_deallocator_;
-
-  // Fine grain allocator on this device
+  /// @brief Fine-grain allocator on this GPU.
   std::function<void*(size_t size, core::MemoryRegion::AllocateFlags flags)> finegrain_allocator_;
-
+  /// @brief Fine-grain deallocator on this GPU.
   std::function<void(void*)> finegrain_deallocator_;
+  /// @brief Coarse-grain allocator on this GPU.
+  std::function<void*(size_t size, core::MemoryRegion::AllocateFlags flags)> coarsegrain_allocator_;
+  /// @brief Coarse-grain deallocator on this GPU.
+  std::function<void(void*)> coarsegrain_deallocator_;
 
   void* trap_handler_tma_region_;
 
@@ -766,13 +779,13 @@ class GpuAgent : public GpuAgentInt {
     uint8_t reserved1[16];
     /* pc_sample_t buffer0[buf_size]; */
     /* pc_sample_t buffer1[buf_size]; */
-  } pcs_hosttrap_sampling_data_t;
+  } pcs_sampling_data_t;
 
   typedef struct {
-    /* Hosttrap data - stored on device so that trap_handler code can access efficiently */
-    pcs_hosttrap_sampling_data_t* device_data;
+    /* Sampling data - stored on device for trap handler access */
+    pcs_sampling_data_t* device_data;
 
-    /* Hosttrap host buffer - stored on host */
+    /* Sampling host buffer - stored on host */
     uint8_t* host_buffer;
     size_t host_buffer_size;
     uint8_t* host_buffer_wrap_pos;
@@ -791,10 +804,15 @@ class GpuAgent : public GpuAgentInt {
 
     os::Thread thread;
     pcs::PcsRuntime::PcSamplingSession* session;
-  } pcs_hosttrap_t;
-
-  pcs_hosttrap_t pcs_hosttrap_data_;
+  } pcs_data_t;
   /* PC Sampling fields - end */
+
+  hsa_status_t UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
+                                        pcs_sampling_data_t* pcs_stochastic_buffers);
+
+  // @brief Thread function to process PC sampling data collected via host-trap
+  // or Stochastic sampling.
+  void PcSamplingThread(pcs_data_t& pcs_data, const char* thread_name);
 
   // @brief device handle
   amdgpu_device_handle ldrm_dev_;
@@ -811,10 +829,16 @@ class GpuAgent : public GpuAgentInt {
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
 
+  // structure for host trap sampling
+  pcs_data_t pcs_hosttrap_data_;
+
+  // structure for stochastic sampling
+  pcs_data_t pcs_stochastic_data_;
+
   /// @brief XGMI CPU<->GPU
-  bool xgmi_cpu_gpu_ = false;
+  bool xgmi_cpu_gpu_;
   /// @brief Is PCIe large BAR enabled.
-  bool large_bar_enabled_ = false;
+  bool large_bar_enabled_;
 };
 
 }  // namespace amd

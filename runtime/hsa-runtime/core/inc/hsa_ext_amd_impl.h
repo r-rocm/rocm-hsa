@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -167,6 +167,11 @@ hsa_status_t
                                       uint32_t *engine_ids_mask);
 
 // Mirrors Amd Extension Apis
+hsa_status_t
+    hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent, hsa_agent_t src_agent,
+                                             uint32_t* recommended_ids_mask);
+
+// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_memory_async_copy_rect(
     const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
     const hsa_dim3_t* src_offset, const hsa_dim3_t* range, hsa_agent_t copy_agent,
@@ -296,6 +301,9 @@ hsa_status_t HSA_API hsa_amd_spm_release(hsa_agent_t agent);
 hsa_status_t HSA_API hsa_amd_spm_set_dest_buffer(hsa_agent_t agent, size_t size, uint32_t* timeout,
                                                  uint32_t* size_copied, void* dest,
                                                  bool* is_data_loss);
+
+hsa_status_t HSA_API hsa_amd_portable_export_dmabuf_v2(const void* ptr,
+                  size_t size, int* dmabuf, uint64_t* offset, uint64_t flags);
 
 // Mirrors Amd Extension Apis
 hsa_status_t HSA_API hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
