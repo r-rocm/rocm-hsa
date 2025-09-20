@@ -9,7 +9,7 @@ Build-Depends:
  pkg-config,
  rocm-core,
  rocm-devicelibs,
- rocm-env,
+ rocm-env (>= 7.0.0),
  rocm-llvm,
  rocm-rocprofiler-register-dev,
  rocm-smi-lib-dev,
