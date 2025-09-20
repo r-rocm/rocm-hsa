@@ -22,17 +22,6 @@ Homepage: https://github.com/ROCm/ROCR-Runtime
 Vcs-Browser: https://github.com/revyos-rocm/rocm-rocr
 Vcs-Git: https://github.com/revyos-rocm/rocm-rocr.git
 
-Package: rocm-hsa
-Architecture: all
-Depends:
- ${misc:Depends},
- rocm-rocr,
-Description: transitional package for rocm-rocr
- This is a transitional package to ease upgrades to rocm-rocr.
- It can safely be removed.
-Section: oldlibs
-Priority: optional
-
 Package: rocm-rocr
 Architecture: any
 Replaces: rocm-hsa (<= 6.2.4-10~)
