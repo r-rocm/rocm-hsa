@@ -1,3 +1,15 @@
+From: CHEN Xuan <chenxuan@iscas.ac.cn>
+Date: Sat, 20 Sep 2025 18:23:54 +0800
+Subject: replace-mm_sfence-and-mm_clflush
+
+---
+ runtime/hsa-runtime/core/inc/amd_gpu_agent.h         |  8 ++++++++
+ runtime/hsa-runtime/core/runtime/amd_aql_queue.cpp   |  8 ++++++++
+ runtime/hsa-runtime/core/runtime/amd_blit_kernel.cpp |  4 ++++
+ runtime/hsa-runtime/core/runtime/intercept_queue.cpp | 12 ++++++++++++
+ runtime/hsa-runtime/core/util/utils.h                |  4 ++++
+ 5 files changed, 36 insertions(+)
+
 diff --git a/runtime/hsa-runtime/core/inc/amd_gpu_agent.h b/runtime/hsa-runtime/core/inc/amd_gpu_agent.h
 index 8cd55e9..700668a 100644
 --- a/runtime/hsa-runtime/core/inc/amd_gpu_agent.h
@@ -21,10 +33,22 @@ index 8cd55e9..700668a 100644
        UNUSED(readback);
      }
 diff --git a/runtime/hsa-runtime/core/runtime/amd_aql_queue.cpp b/runtime/hsa-runtime/core/runtime/amd_aql_queue.cpp
-index 52635b7..c9570d1 100644
+index 52635b7..150dfa5 100644
 --- a/runtime/hsa-runtime/core/runtime/amd_aql_queue.cpp
 +++ b/runtime/hsa-runtime/core/runtime/amd_aql_queue.cpp
-@@ -1554,7 +1554,11 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
+@@ -470,7 +470,11 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
+     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_));
+   } else {
+     // Hardware doorbell supports AQL semantics.
++#if !defined(__riscv)
+     _mm_sfence();
++#else
++    asm volatile("fence w,w" ::: "memory");
++#endif
+     *(signal_.hardware_doorbell_ptr) = uint64_t(value);
+     /* signal_ is allocated as uncached so we do not need read-back to flush WC */
+   }
+@@ -1554,7 +1558,11 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
    memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
    if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
      // Ensure the packet body is written as header may get reordered when writing over PCIE

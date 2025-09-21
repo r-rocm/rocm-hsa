@@ -8,7 +8,7 @@ Subject: Add riscv64 support
  2 files changed, 9 insertions(+), 1 deletion(-)
 
 diff --git a/runtime/hsa-runtime/core/util/lnx/os_linux.cpp b/runtime/hsa-runtime/core/util/lnx/os_linux.cpp
-index 4d62979..f05e4eb 100644
+index c6d90f7..ceadc51 100644
 --- a/runtime/hsa-runtime/core/util/lnx/os_linux.cpp
 +++ b/runtime/hsa-runtime/core/util/lnx/os_linux.cpp
 @@ -66,8 +66,12 @@
